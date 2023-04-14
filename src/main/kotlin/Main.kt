@@ -1,37 +1,30 @@
-import kotlinx.coroutines.*
 import java.io.File
+import java.util.concurrent.Executors
 
-suspend fun main(args: Array<String>) {
+fun main(args: Array<String>) {
     val directoryPath = args[0]
     val statisticsPath = args[1]
+    val concurrencyLevel = 10
     val header = "$directoryPath $statisticsPath"
     val files = File(directoryPath).walk().filter {
         it.absolutePath.endsWith(".java") && !it.absolutePath.contains("test/")
     }
     val statisticsFile = File(statisticsPath)
     if (!statisticsFile.exists()) {
-        withContext(Dispatchers.IO) {
-            statisticsFile.createNewFile()
-        }
+        statisticsFile.createNewFile()
     }
     val stateFile = File("state.txt")
     if (!stateFile.exists()) {
-        withContext(Dispatchers.IO) {
-            stateFile.createNewFile()
-            stateFile.writeText("$header\n")
-        }
+        stateFile.createNewFile()
+        stateFile.writeText("$header\n")
     }
-    val processor = Processor(statisticsFile, stateFile, header)
+    val processor = Processor(statisticsFile, stateFile, header, files.count())
+    val executor = Executors.newFixedThreadPool(concurrencyLevel)
 
-    println("Begin processing")
-    coroutineScope {
-        val launches = mutableListOf<Job>()
-        files.forEach { file ->
-            launches.add(launch {
-                processor.processFile(file, files.count())
-            })
+    files.forEach { file ->
+        executor.submit {
+            processor.processFile(file)
         }
-        launches.joinAll()
     }
-    println("End processing")
+    executor.shutdown()
 }

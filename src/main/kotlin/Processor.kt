@@ -1,11 +1,10 @@
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.regex.Pattern
 
-class Processor(statisticsFile: File, stateFile: File, expectedHeader: String) {
+class Processor(statisticsFile: File, stateFile: File, expectedHeader: String, numberOfFiles: Int) {
     private val _statisticsFile = statisticsFile
     private val _stateFile = stateFile
+    private val _numberOfFiles = numberOfFiles
     private val _word2Cnt = mutableMapOf<String, Int>()
     private val _processedFiles = mutableSetOf<String>()
 
@@ -19,13 +18,15 @@ class Processor(statisticsFile: File, stateFile: File, expectedHeader: String) {
                     _word2Cnt[keyword] = cnt.toInt()
                 }
             }
+            println("Continue processing ([${_processedFiles.count()}/$numberOfFiles] files have been preprocessed)")
         } else {
             stateFile.writeText("$expectedHeader\n")
             statisticsFile.writeText("")
+            println("Begin processing")
         }
     }
 
-    suspend fun processFile(file: File, numberOfFiles: Int) {
+    fun processFile(file: File) {
         if (_processedFiles.contains(file.path)) {
             return
         }
@@ -37,13 +38,16 @@ class Processor(statisticsFile: File, stateFile: File, expectedHeader: String) {
                 }.forEach { word -> counter[word] = counter[word]?.plus(1) ?: 1 }
             }
         }
-        _mutex.withLock {
-            updateStatistics(counter)
-            updateState(file, numberOfFiles)
-        }
+        update(counter, file)
     }
 
-    private fun updateStatistics(counter: MutableMap<String, Int>) {
+    @Synchronized
+    private fun update(counter: Map<String, Int>, file: File) {
+        updateStatistics(counter)
+        updateState(file)
+    }
+
+    private fun updateStatistics(counter: Map<String, Int>) {
         counter.forEach { (word, count) ->
             _word2Cnt[word] = _word2Cnt[word]?.plus(count) ?: count
         }
@@ -52,13 +56,13 @@ class Processor(statisticsFile: File, stateFile: File, expectedHeader: String) {
         }
     }
 
-    private fun updateState(file: File, numberOfFiles: Int) {
+    private fun updateState(file: File) {
         _stateFile.appendText("${file.path}\n")
         _processedFiles.add(file.path)
-        println("[${_processedFiles.count()}/$numberOfFiles] Processed file ${file.path}")
+        println("[${_processedFiles.count()}/$_numberOfFiles] Processed file ${file.path}")
+        if (_processedFiles.count() == _numberOfFiles) println("End processing")
     }
 
-    private val _mutex = Mutex()
     private val _pattern = Pattern.compile("[^a-z]")
     private val _keywords = listOf(
         "byte", "short", "int", "long", "char", "float", "double", "boolean",                                                   // primitives
