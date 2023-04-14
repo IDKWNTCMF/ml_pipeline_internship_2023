@@ -1,5 +1,7 @@
+import sun.misc.Signal
 import java.io.File
 import java.util.regex.Pattern
+import kotlin.system.exitProcess
 
 class Processor(statisticsFile: File, stateFile: File, expectedHeader: String, numberOfFiles: Int) {
     private val _statisticsFile = statisticsFile
@@ -43,6 +45,15 @@ class Processor(statisticsFile: File, stateFile: File, expectedHeader: String, n
 
     @Synchronized
     private fun update(counter: Map<String, Int>, file: File) {
+        val statisticsText = _statisticsFile.readText()
+        val stateText = _stateFile.readText()
+        Signal.handle(Signal("INT")) {
+            println("Process has been interrupted with sigint")
+            _statisticsFile.writeText(statisticsText)
+            _stateFile.writeText(stateText)
+            exitProcess(0)
+        }
+
         updateStatistics(counter)
         updateState(file)
     }
