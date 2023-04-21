@@ -1,29 +1,32 @@
-import sun.misc.Signal
 import java.io.File
 import java.util.regex.Pattern
-import kotlin.system.exitProcess
 
 class Processor(statisticsFile: File, stateFile: File, expectedHeader: String, numberOfFiles: Int) {
     private val _statisticsFile = statisticsFile
     private val _stateFile = stateFile
+    private val _header = expectedHeader
     private val _numberOfFiles = numberOfFiles
     private val _word2Cnt = mutableMapOf<String, Int>()
     private val _processedFiles = mutableSetOf<String>()
+    private var _stableState = Pair(mapOf<String, Int>(), setOf<String>())
 
     init {
         val lines = stateFile.readLines()
         if (lines.isNotEmpty() && lines.first() == expectedHeader) {
-            _processedFiles.addAll(lines.drop(1))
+            lines.drop(1).forEach { filename ->
+                if (File(filename).exists()) {
+                    _processedFiles.add(filename)
+                }
+            }
             statisticsFile.useLines { statistics ->
                 statistics.forEach { line ->
                     val (keyword, cnt) = line.split(": ")
                     _word2Cnt[keyword] = cnt.toInt()
                 }
             }
+            _stableState = Pair(_word2Cnt, _processedFiles)
             println("Continue processing ([${_processedFiles.count()}/$numberOfFiles] files have been preprocessed)")
         } else {
-            stateFile.writeText("$expectedHeader\n")
-            statisticsFile.writeText("")
             println("Begin processing")
         }
     }
@@ -45,33 +48,37 @@ class Processor(statisticsFile: File, stateFile: File, expectedHeader: String, n
 
     @Synchronized
     private fun update(counter: Map<String, Int>, file: File) {
-        val statisticsText = _statisticsFile.readText()
-        val stateText = _stateFile.readText()
-        Signal.handle(Signal("INT")) {
-            println("Process has been interrupted with sigint")
-            _statisticsFile.writeText(statisticsText)
-            _stateFile.writeText(stateText)
-            exitProcess(0)
-        }
-
         updateStatistics(counter)
         updateState(file)
+        _stableState = Pair(_word2Cnt, _processedFiles)
     }
 
+    @Synchronized
     private fun updateStatistics(counter: Map<String, Int>) {
         counter.forEach { (word, count) ->
             _word2Cnt[word] = _word2Cnt[word]?.plus(count) ?: count
         }
-        _statisticsFile.bufferedWriter().use {writer ->
-            _word2Cnt.toSortedMap().forEach { (word, count) -> writer.write("$word: $count\n") }
+    }
+
+    @Synchronized
+    private fun updateState(file: File) {
+        _processedFiles.add(file.path)
+        println("[${_processedFiles.count()}/$_numberOfFiles] Processed file ${file.path}")
+        if (_processedFiles.count() == _numberOfFiles) {
+            println("End processing")
+            saveStatistics(_word2Cnt, _processedFiles)
         }
     }
 
-    private fun updateState(file: File) {
-        _stateFile.appendText("${file.path}\n")
-        _processedFiles.add(file.path)
-        println("[${_processedFiles.count()}/$_numberOfFiles] Processed file ${file.path}")
-        if (_processedFiles.count() == _numberOfFiles) println("End processing")
+    @Synchronized
+    fun saveStatistics(word2Cnt: Map<String, Int> = _stableState.first, processedFiles: Set<String> = _stableState.second) {
+        _statisticsFile.bufferedWriter().use { writer ->
+            word2Cnt.toSortedMap().forEach { (word, count) -> writer.write("$word: $count\n") }
+        }
+        _stateFile.bufferedWriter().use { writer ->
+            writer.write("$_header\n")
+            processedFiles.forEach { filepath -> writer.write("$filepath\n") }
+        }
     }
 
     private val _pattern = Pattern.compile("[^a-z]")
